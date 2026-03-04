@@ -1,0 +1,23 @@
+{
+  "name": "ifood-integrator-poc",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "migrate": "node src/migrate.js",
+    "server": "node src/server.js",
+    "worker": "node src/worker.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.13.6",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "ioredis": "^5.10.0",
+    "pino": "^10.3.1"
+  }
+}
