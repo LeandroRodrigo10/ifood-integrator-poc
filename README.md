@@ -10,10 +10,11 @@ This project simulates how an ERP can integrate with iFood using a resilient eve
 • Idempotent event processing  
 • Redis Streams queue  
 • Worker-based async processing (consumer group)  
-• Controlled retry with backoff intent  
+• Controlled retry with exponential backoff (next_run_at)  
 • Event audit logs  
 • Manual event reprocessing  
-• iFood ACK after processing (prevents duplicates)
+• iFood ACK after processing (prevents duplicates)  
+• last_error tracking for troubleshooting  
 
 ## Architecture Overview
 
@@ -25,9 +26,9 @@ Key architectural decisions:
 • Events are persisted before queueing  
 • Redis Streams ensures reliable delivery  
 • Worker processes events asynchronously  
-• Retry prevents event loss and increments attempts  
+• Retry uses next_run_at to avoid hot-loop and increments attempts  
 • All events are auditable and reprocessable  
-• Idempotency key is UNIQUE in the database
+• Idempotency key is UNIQUE in the database  
 
 ## Lifecycle validated
 
@@ -41,50 +42,59 @@ Drop code events may appear and are audit-only.
 
 GET /health  
 GET /events  
+GET /events/:id  
 GET /events/:id/logs  
 POST /events/:id/reprocess  
 POST /ifood/poll  
 
+Notes:
+- `GET /events/:id` returns `{ event, logs }` for easier debugging.
+- `last_error` is stored in `integration_events` when a failure happens and cleared on success.
+
 ## Running Locally
 
-Install dependencies
+Install dependencies:
 ```bash
 npm install
 
-Start Redis
+Start Redis:
 
 docker compose up -d
 
-Run migrations
+Run migrations:
 
 npm run migrate
 
-Start the HTTP server
+Start the HTTP server:
 
 npm run server
 
-Start the worker
+Start the worker (separate terminal):
 
 npm run worker
 Testing
 
-Trigger polling manually
+Trigger polling manually:
 
 curl -X POST http://localhost:3000/ifood/poll
 
-List persisted events
+List persisted events:
 
 curl http://localhost:3000/events
 
-Get event logs
+Get event details (event + logs):
+
+curl http://localhost:3000/events/:id
+
+Get event logs only:
 
 curl http://localhost:3000/events/:id/logs
 
-Manual reprocess
+Manual reprocess:
 
 curl -X POST http://localhost:3000/events/:id/reprocess
 Notes
 
 This project represents the architectural core of a marketplace integration module.
 
-It is a proof of concept and uses an ERP mock to demonstrate flow, retry, auditing, and reprocessing.
+It is a proof of concept and uses an ERP mock to demonstrate flow, retry, auditing, troubleshooting (last_error), and reprocessing.
