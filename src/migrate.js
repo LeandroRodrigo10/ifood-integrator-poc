@@ -15,6 +15,7 @@ db.exec(`
     status TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     next_run_at TEXT NULL,
+    last_error TEXT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -35,5 +36,12 @@ db.exec(`
     FOREIGN KEY(event_id) REFERENCES integration_events(id)
   );
 `);
+
+const cols = db.prepare("PRAGMA table_info(integration_events);").all();
+const hasLastError = cols.some((c) => c.name === "last_error");
+
+if (!hasLastError) {
+  db.prepare("ALTER TABLE integration_events ADD COLUMN last_error TEXT NULL;").run();
+}
 
 console.log("Migration OK");

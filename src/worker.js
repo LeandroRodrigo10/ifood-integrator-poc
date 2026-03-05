@@ -95,6 +95,7 @@ const markDoneStmt = db.prepare(`
   UPDATE integration_events
   SET status='done',
       next_run_at=NULL,
+      last_error=NULL,
       updated_at=?
   WHERE id=?
 `);
@@ -104,6 +105,7 @@ const markRetryStmt = db.prepare(`
   SET status='retry',
       attempts=?,
       next_run_at=?,
+      last_error=?,
       updated_at=?
   WHERE id=?
 `);
@@ -113,6 +115,7 @@ const markFailedStmt = db.prepare(`
   SET status='failed',
       attempts=?,
       next_run_at=NULL,
+      last_error=?,
       updated_at=?
   WHERE id=?
 `);
@@ -247,7 +250,7 @@ async function startWorker() {
         const nextAttempts = (event.attempts || 0) + 1;
 
         if (nextAttempts >= MAX_ATTEMPTS) {
-          markFailedStmt.run(nextAttempts, nowIso(), eventId);
+          markFailedStmt.run(nextAttempts, errMsg, nowIso(), eventId);
           insertLog(eventId, "error", "MAX_ATTEMPTS_REACHED", {
             attempts: nextAttempts,
             error: errMsg
@@ -260,7 +263,7 @@ async function startWorker() {
         const backoffSeconds = calcBackoffSeconds(nextAttempts);
         const nextRunAt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
 
-        markRetryStmt.run(nextAttempts, nextRunAt, nowIso(), eventId);
+        markRetryStmt.run(nextAttempts, nextRunAt, errMsg, nowIso(), eventId);
 
         insertLog(eventId, "warn", "RETRY_SCHEDULED", {
           attempts: nextAttempts,
