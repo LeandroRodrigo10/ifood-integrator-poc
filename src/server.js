@@ -7,10 +7,11 @@ const { redis, ensureConsumerGroup } = require("./redis");
 const { pollEvents } = require("./ifood");
 const { normalizeIfoodEvent } = require("./ifoodAdapter");
 
-const logger = pino({ level: "info" });
+const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const STREAM_KEY = process.env.STREAM_KEY || "integration_events_stream";
 const CONSUMER_GROUP = process.env.CONSUMER_GROUP || "ifood_workers";
+const PORT = Number(process.env.PORT || 3000);
 
 function insertLog(eventId, level, message, data) {
   db.prepare(`
@@ -31,7 +32,6 @@ async function enqueueEvent(eventId) {
 }
 
 async function bootstrap() {
-
   await ensureConsumerGroup(STREAM_KEY, CONSUMER_GROUP);
 
   const app = express();
@@ -42,24 +42,20 @@ async function bootstrap() {
       const redisPing = await redis.ping();
       const dbTest = db.prepare("SELECT 1 as ok").get();
 
-      res.json({
+      return res.json({
         status: "ok",
         redis: redisPing,
         sqlite: dbTest.ok
       });
-
     } catch (err) {
-
-      res.status(500).json({
+      return res.status(500).json({
         status: "error",
-        error: err.message
+        error: err?.message || String(err)
       });
-
     }
   });
 
   app.get("/events", (req, res) => {
-
     const events = db.prepare(`
       SELECT *
       FROM integration_events
@@ -67,26 +63,59 @@ async function bootstrap() {
       LIMIT 100
     `).all();
 
-    res.json(events);
-
+    return res.json(events);
   });
 
   app.get("/events/:id/logs", (req, res) => {
+    const id = Number(req.params.id);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "invalid id" });
+    }
 
     const logs = db.prepare(`
       SELECT *
       FROM integration_event_logs
       WHERE event_id = ?
-      ORDER BY id
-    `).all(req.params.id);
+      ORDER BY id ASC
+    `).all(id);
 
-    res.json(logs);
+    return res.json(logs);
+  });
 
+  app.get("/events/:id", (req, res) => {
+    const id = Number(req.params.id);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "invalid id" });
+    }
+
+    const event = db.prepare(`
+      SELECT *
+      FROM integration_events
+      WHERE id = ?
+    `).get(id);
+
+    if (!event) {
+      return res.status(404).json({ error: "event not found" });
+    }
+
+    const logs = db.prepare(`
+      SELECT *
+      FROM integration_event_logs
+      WHERE event_id = ?
+      ORDER BY id ASC
+    `).all(id);
+
+    return res.json({ event, logs });
   });
 
   app.post("/events/:id/reprocess", async (req, res) => {
-
     const id = Number(req.params.id);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "invalid id" });
+    }
 
     const event = db.prepare(`
       SELECT *
@@ -110,30 +139,24 @@ async function bootstrap() {
 
     await enqueueEvent(id);
 
-    res.json({
+    return res.json({
       requeued: true,
       eventId: id
     });
-
   });
 
   app.post("/ifood/poll", async (req, res) => {
-
     try {
-
       const rawEvents = await pollEvents();
 
       let inserted = 0;
       let skipped = 0;
 
       for (const raw of rawEvents) {
-
         const canonical = normalizeIfoodEvent(raw);
-
         const createdAt = nowIso();
 
         try {
-
           const result = db.prepare(`
             INSERT INTO integration_events
             (
@@ -173,51 +196,44 @@ async function bootstrap() {
             updated_at: createdAt
           });
 
-          const eventId = result.lastInsertRowid;
+          const eventId = Number(result.lastInsertRowid);
 
           insertLog(eventId, "info", "IFOOD_EVENT_RECEIVED", raw);
 
           await enqueueEvent(eventId);
 
           inserted++;
-
         } catch (err) {
+          const msg = err?.message || String(err);
 
-          if (err.message.includes("UNIQUE")) {
+          if (msg.includes("UNIQUE")) {
             skipped++;
             continue;
           }
 
           throw err;
-
         }
-
       }
 
-      res.json({
+      return res.json({
         polled: rawEvents.length,
         inserted,
         skipped
       });
-
     } catch (err) {
-
       logger.error(err);
-
-      res.status(500).json({
-        error: err.message
+      return res.status(500).json({
+        error: err?.message || String(err)
       });
-
     }
-
   });
 
-  const port = process.env.PORT || 3000;
-
-  app.listen(port, () => {
-    logger.info(`server running on port ${port}`);
+  app.listen(PORT, () => {
+    logger.info(`server running on port ${PORT}`);
   });
-
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  logger.error({ err: err?.message || String(err) }, "server crashed on startup");
+  process.exit(1);
+});
